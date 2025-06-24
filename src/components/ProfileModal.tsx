@@ -282,7 +282,7 @@ export const ProfileModal = memo(function ProfileModal({
                 )}
 
                 {/* Debug Info (Development Only) */}
-                {process.env.NODE_ENV === 'development' && profile.event && (
+                {import.meta.env.DEV && profile.event && (
                   <details className="mt-6 text-xs text-gray-500">
                     <summary className="cursor-pointer font-medium">Debug Info</summary>
                     <pre className="mt-2 bg-gray-100 p-2 rounded overflow-auto">
