@@ -1,17 +1,9 @@
-import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
 import { shortenPubkey } from '../utils/nostr';
 import { ProfileImage } from './ProfileImage';
-import { ProfileModal } from './ProfileModal';
-import type { UserServerList } from '../types';
 
-interface HeaderProps {
-  userServerList?: UserServerList | null;
-}
-
-export function Header({ userServerList }: HeaderProps = {}) {
+export function Header() {
   const { user, logout } = useAuth();
-  const [showProfileModal, setShowProfileModal] = useState(false);
 
   return (
     <header className="bg-white border-b border-gray-200 px-3 sm:px-6 py-3 sm:py-4">
@@ -36,11 +28,7 @@ export function Header({ userServerList }: HeaderProps = {}) {
         </div>
 
         <div className="flex items-center space-x-2 sm:space-x-4">
-          <button
-            onClick={() => setShowProfileModal(true)}
-            className="flex items-center p-1 rounded-lg hover:bg-gray-100 transition-colors"
-            title="View profile"
-          >
+          <div className="flex items-center">
             <ProfileImage
               src={user?.picture}
               alt={user?.displayName || 'Profile'}
@@ -61,7 +49,7 @@ export function Header({ userServerList }: HeaderProps = {}) {
                 {user?.displayName || 'User'}
               </div>
             </div>
-          </button>
+          </div>
           
           <button
             onClick={logout}
@@ -84,17 +72,6 @@ export function Header({ userServerList }: HeaderProps = {}) {
           </button>
         </div>
       </div>
-      
-      {/* Profile Modal */}
-      {user?.pubkey && (
-        <ProfileModal
-          isOpen={showProfileModal}
-          onClose={() => setShowProfileModal(false)}
-          pubkey={user.pubkey}
-          isOwnProfile={true}
-          userServerList={userServerList}
-        />
-      )}
     </header>
   );
 }

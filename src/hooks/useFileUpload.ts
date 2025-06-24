@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
 import { useAuth } from './useAuth';
+import { useMediaCache } from './useMediaCache';
 import { DEFAULT_BLOSSOM_SERVERS, createBlossomAPI, EnhancedBlossomAPI } from '../services/blossom';
 import { validateFile, removeExifData, ExifRemovalError } from '../utils/fileUtils';
-import type { UserServerList, BlossomServer } from '../types';
+import type { UserServerList, BlossomServer, BlossomBlob } from '../types';
 
 export interface UploadProgress {
   file: File;
@@ -28,6 +29,7 @@ export function useFileUpload({
   selectedServer = DEFAULT_BLOSSOM_SERVERS[0] 
 }: UseFileUploadOptions) {
   const { getSigningMethod } = useAuth();
+  const { addMedia } = useMediaCache();
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
 
   const updateUploadProgress = useCallback((file: File, updates: Partial<UploadProgress>) => {
@@ -99,6 +101,33 @@ export function useFileUpload({
           updateUploadProgress(file, { progress: 60 });
           const result = await enhancedAPI.uploadToAllServers(processedFile, signingMethod);
           
+          // Create BlossomBlob object and add to cache
+          const newBlob: BlossomBlob = {
+            sha256: result.primaryResult.sha256,
+            size: processedFile.size,
+            type: processedFile.type,
+            url: result.primaryResult.url,
+            uploaded: Math.floor(Date.now() / 1000), // Unix timestamp
+            metadata: {
+              filename: processedFile.name
+            },
+            availableServers: [
+              ...result.successful.map(s => ({ 
+                serverUrl: s.serverUrl, 
+                serverName: new URL(s.serverUrl).hostname,
+                success: true 
+              })),
+              ...result.failed.map(f => ({ 
+                serverUrl: f.serverUrl, 
+                serverName: new URL(f.serverUrl).hostname,
+                success: false 
+              }))
+            ]
+          };
+          
+          // Add to media cache immediately
+          addMedia(newBlob);
+          
           updateUploadProgress(file, { 
             status: 'success', 
             progress: 100, 
@@ -128,6 +157,26 @@ export function useFileUpload({
           
           const fallbackResult = await enhancedAPI.uploadWithFallbackSequential(processedFile, signingMethod);
           
+          // Create BlossomBlob object and add to cache for fallback upload
+          const fallbackBlob: BlossomBlob = {
+            sha256: fallbackResult.result.sha256,
+            size: processedFile.size,
+            type: processedFile.type,
+            url: fallbackResult.result.url,
+            uploaded: Math.floor(Date.now() / 1000),
+            metadata: {
+              filename: processedFile.name
+            },
+            availableServers: [{
+              serverUrl: fallbackResult.serverUrl,
+              serverName: new URL(fallbackResult.serverUrl).hostname,
+              success: true
+            }]
+          };
+          
+          // Add to media cache immediately
+          addMedia(fallbackBlob);
+          
           updateUploadProgress(file, { 
             status: 'success', 
             progress: 100, 
@@ -146,6 +195,26 @@ export function useFileUpload({
         updateUploadProgress(file, { progress: 70 });
         
         const result = await api.uploadFile(processedFile, signingMethod);
+        
+        // Create BlossomBlob object and add to cache for default server upload
+        const defaultBlob: BlossomBlob = {
+          sha256: result.sha256,
+          size: processedFile.size,
+          type: processedFile.type,
+          url: result.url,
+          uploaded: Math.floor(Date.now() / 1000),
+          metadata: {
+            filename: processedFile.name
+          },
+          availableServers: [{
+            serverUrl: selectedServer.url,
+            serverName: selectedServer.name,
+            success: true
+          }]
+        };
+        
+        // Add to media cache immediately
+        addMedia(defaultBlob);
         
         updateUploadProgress(file, { 
           status: 'success', 

@@ -5,7 +5,6 @@ import type { RelayMetadata } from '../types';
 
 interface RelayOnboardingProps {
   onComplete: (relayList: Record<string, RelayMetadata>) => void;
-  onSkip: () => void;
 }
 
 interface PopularRelay {
@@ -66,9 +65,16 @@ const POPULAR_RELAYS: PopularRelay[] = [
     location: 'Australia',
     cost: 'free'
   },
+  {
+    url: 'wss://nostr.oxtr.dev',
+    name: 'Oxtr',
+    description: 'Community relay by Oxtr',
+    location: 'Global',
+    cost: 'free'
+  },
 ];
 
-export function RelayOnboarding({ onComplete, onSkip }: RelayOnboardingProps) {
+export function RelayOnboarding({ onComplete }: RelayOnboardingProps) {
   const { user, getSigningMethod } = useAuth();
   const [step, setStep] = useState<'welcome' | 'select' | 'custom' | 'saving'>('welcome');
   const [selectedRelays, setSelectedRelays] = useState<Record<string, RelayMetadata>>({});
@@ -184,34 +190,42 @@ export function RelayOnboarding({ onComplete, onSkip }: RelayOnboardingProps) {
             </div>
             <h2 className="text-2xl font-bold text-gray-900 mb-2">Set Up Your Relays</h2>
             <p className="text-gray-600">
-              Nostr relays are servers that store and distribute your data. You need at least one relay to publish and retrieve your Blossom server configuration.
+              Nostr relays are servers that store and distribute your data. <strong>You must configure at least one relay</strong> to publish and retrieve your Blossom server configuration.
             </p>
           </div>
 
           <div className="space-y-4">
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-              <h3 className="font-medium text-blue-900 mb-2">Why do I need relays?</h3>
+              <h3 className="font-medium text-blue-900 mb-2">Why relays are required:</h3>
               <ul className="text-sm text-blue-800 space-y-1">
-                <li>• Store your server preferences securely</li>
-                <li>• Enable discovery across the Nostr network</li>
-                <li>• Provide redundancy and reliability</li>
-                <li>• Follow decentralized best practices</li>
+                <li>• Store your server preferences securely on the Nostr network</li>
+                <li>• Enable discovery and syncing across devices</li>
+                <li>• Provide redundancy and reliability for your data</li>
+                <li>• Essential for the decentralized infrastructure to work</li>
               </ul>
+            </div>
+            
+            <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+              <div className="flex items-start">
+                <svg className="w-5 h-5 text-orange-600 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <div>
+                  <h3 className="font-medium text-orange-900 mb-1">Required Step</h3>
+                  <p className="text-sm text-orange-800">
+                    Without relays, you cannot save your server configuration or use this application. This step cannot be skipped.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="flex space-x-3 mt-6">
-            <button
-              onClick={onSkip}
-              className="flex-1 px-4 py-2 text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
-            >
-              Skip for now
-            </button>
+          <div className="flex mt-6">
             <button
               onClick={() => setStep('select')}
-              className="flex-1 px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors"
+              className="w-full px-4 py-2 bg-pink-600 text-white rounded-lg hover:bg-pink-700 transition-colors"
             >
-              Get Started
+              Configure Relays
             </button>
           </div>
         </div>
@@ -227,7 +241,9 @@ export function RelayOnboarding({ onComplete, onSkip }: RelayOnboardingProps) {
             <div className="flex items-center justify-between mb-6">
               <div>
                 <h2 className="text-2xl font-bold text-gray-900">Choose Your Relays</h2>
-                <p className="text-gray-600 mt-1">Select at least one relay to get started</p>
+                <p className="text-gray-600 mt-1">
+                  <span className="text-red-600 font-medium">Required:</span> Select at least one relay to continue
+                </p>
               </div>
               <button
                 onClick={() => setStep('custom')}

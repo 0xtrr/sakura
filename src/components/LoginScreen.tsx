@@ -173,8 +173,7 @@ export function LoginScreen() {
                   Connect with Nostr
                 </h2>
                 <p className="text-gray-600 text-sm">
-                  Sign in using your Nostr browser extension to manage your media files
-                  with complete privacy and ownership.
+                  Sign in using your Nostr browser extension to manage your media files.
                 </p>
               </div>
 

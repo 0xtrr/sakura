@@ -290,7 +290,7 @@ export function ServerOnboarding({ onComplete, onCancel }: ServerOnboardingProps
               <p className="font-medium mb-1">About Blossom Servers</p>
               <p>
                 Blossom servers store your media files. You can change these settings later in the Settings page. 
-                Your selection will be saved to the Nostr network so it syncs across devices.
+                Your selection will be saved to the Nostr network so it syncs across devices and apps.
               </p>
             </div>
           </div>

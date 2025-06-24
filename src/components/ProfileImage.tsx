@@ -4,7 +4,7 @@ interface ProfileImageProps {
   src?: string;
   alt: string;
   fallbackText: string;
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'sm' | 'md' | 'lg' | 'xl' | '2xl';
   className?: string;
 }
 
@@ -22,6 +22,8 @@ export const ProfileImage = memo(function ProfileImage({
     sm: 'w-6 h-6 text-xs',
     md: 'w-8 h-8 text-sm',
     lg: 'w-12 h-12 text-base',
+    xl: 'w-20 h-20 text-lg',
+    '2xl': 'w-32 h-32 text-2xl',
   };
 
   const sizeClass = sizeClasses[size];
@@ -39,12 +41,12 @@ export const ProfileImage = memo(function ProfileImage({
   const showFallback = !src || imageError || imageLoading;
 
   return (
-    <div className={`relative ${sizeClass} ${className}`}>
+    <div className={`relative ${sizeClass} ${className} rounded-full`}>
       {src && !imageError && (
         <img
           src={src}
           alt={alt}
-          className={`${sizeClass} rounded-full object-cover border border-gray-200 ${
+          className={`${sizeClass} rounded-full object-cover ${
             imageLoading ? 'opacity-0' : 'opacity-100'
           } transition-opacity duration-200`}
           onError={handleImageError}

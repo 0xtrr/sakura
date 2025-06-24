@@ -12,6 +12,7 @@ const PRIMARY_DISCOVERY_RELAYS = [
   'wss://nos.lol',
   'wss://relay.nostr.band',
   'wss://relay.snort.social',
+  'wss://nostr.oxtr.dev',
 ];
 
 /**

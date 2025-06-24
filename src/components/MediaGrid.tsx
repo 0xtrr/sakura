@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { useMediaCache } from '../hooks/useMediaCache';
 import { EnhancedBlossomAPI } from '../services/blossom';
-import type { BlossomBlob, UserServerList } from '../types';
+import type { UserServerList } from '../types';
 import { formatFileSize, isImage, isVideo } from '../utils/fileUtils';
 import { copyToClipboard } from '../utils/clipboard';
 import { ServerAvailabilityIndicator } from './ServerAvailabilityIndicator';
@@ -14,18 +15,20 @@ interface MediaGridProps {
 }
 
 export function MediaGrid({ userServerList }: MediaGridProps) {
-  const { user, getSigningMethod } = useAuth();
-  const [media, setMedia] = useState<BlossomBlob[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { getSigningMethod } = useAuth();
+  const { media, loading, error, isStale, isDataStale, fetchMedia, removeMedia } = useMediaCache();
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [filterBy, setFilterBy] = useState<FilterOption>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Check if current data is stale for this server list
+  const dataIsStale = isStale || isDataStale(userServerList);
+
   // Memoized sorted and filtered media
   const filteredAndSortedMedia = useMemo(() => {
-    let filtered = media;
+    // First filter out any null/invalid items
+    let filtered = media.filter(item => item && item.type && item.sha256);
 
     // Apply search filter
     if (searchTerm.trim()) {
@@ -74,59 +77,15 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
     return sorted;
   }, [media, sortBy, filterBy, searchTerm]);
 
-  const loadMediaWithServerList = useCallback(async (serverList: UserServerList) => {
-    if (!user) return;
-
-    const signingMethod = getSigningMethod();
-    if (!signingMethod) {
-      setError('No signing method available. Please login again.');
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      let blobs: BlossomBlob[];
-      
-      if (serverList && serverList.servers.length > 0) {
-        // Use enhanced API to fetch from ALL user servers
-        const primaryServer = {
-          url: serverList.servers[0],
-          name: new URL(serverList.servers[0]).hostname,
-          description: 'User server'
-        };
-        const enhancedAPI = new EnhancedBlossomAPI(primaryServer, serverList);
-        blobs = await enhancedAPI.listBlobsFromAllServers(user.pubkey, signingMethod);
-      } else {
-        // No user servers configured - this should not happen due to onboarding
-        throw new Error('No Blossom servers configured. Please configure your servers in Settings first.');
-      }
-      
-      setMedia(blobs);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load media');
-    } finally {
-      setLoading(false);
-    }
-  }, [user, getSigningMethod]);
-
+  // Load media on mount and when server list changes
   useEffect(() => {
-    // Load media when user or userServerList changes
-    if (user && userServerList) {
-      loadMediaWithServerList(userServerList);
-    } else if (user && userServerList === null) {
-      // User is authenticated but no server list configured
-      setError('No server configuration found. Please configure your servers in Settings first.');
-      setLoading(false);
-    }
-  }, [user, userServerList, loadMediaWithServerList]);
+    console.log('📡 MediaGrid useEffect triggered - userServerList servers:', userServerList?.servers.length, 'fetchMedia ref changed');
+    fetchMedia(userServerList);
+  }, [userServerList, fetchMedia]);
 
   const loadMedia = useCallback(async () => {
-    if (!user || !userServerList) return;
-    await loadMediaWithServerList(userServerList);
-  }, [user, userServerList, loadMediaWithServerList]);
+    await fetchMedia(userServerList, true); // Force refresh
+  }, [userServerList, fetchMedia]);
 
   const deleteMedia = useCallback(async (sha256: string) => {
     if (!confirm('Are you sure you want to delete this file?')) return;
@@ -137,9 +96,13 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
       return;
     }
 
+    // Find the item before removing it (for potential rollback)
+    const itemToDelete = media.find(item => item.sha256 === sha256);
+    if (!itemToDelete) return;
+
     try {
-      // Optimistically remove from UI first for immediate feedback
-      setMedia(prev => prev.filter(item => item.sha256 !== sha256));
+      // Optimistically remove from cache first for immediate feedback
+      removeMedia(sha256);
       
       // Use enhanced API with fallback if user has server list
       if (userServerList && userServerList.servers.length > 0) {
@@ -158,11 +121,11 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
       console.log(`Successfully deleted file with SHA256: ${sha256}`);
     } catch (err) {
       console.error('Delete failed:', err);
-      // Restore the item to the UI if deletion failed
+      // Refresh cache to restore correct state
       await loadMedia();
       alert('Failed to delete file: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
-  }, [userServerList, getSigningMethod, setMedia, loadMedia]);
+  }, [userServerList, getSigningMethod, media, removeMedia, loadMedia]);
 
   const copyUrl = useCallback(async (url: string) => {
     try {
@@ -229,8 +192,25 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
                 </div>
               )}
               <div className="flex gap-2">
-                <button onClick={loadMedia} className="flex-1 sm:flex-none btn-secondary text-xs sm:text-sm">
-                  Refresh
+                <button 
+                  onClick={loadMedia} 
+                  className={`flex-1 sm:flex-none text-xs sm:text-sm transition-colors ${
+                    dataIsStale 
+                      ? 'bg-orange-100 text-orange-700 border border-orange-200 hover:bg-orange-200 px-3 py-2 rounded-lg'
+                      : 'btn-secondary'
+                  }`}
+                  title={dataIsStale ? 'Data may be outdated - click to refresh' : 'Refresh media list'}
+                >
+                  {dataIsStale ? (
+                    <>
+                      <svg className="w-3 h-3 mr-1 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                      </svg>
+                      Update Available
+                    </>
+                  ) : (
+                    'Refresh'
+                  )}
                 </button>
               </div>
             </div>

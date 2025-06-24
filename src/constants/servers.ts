@@ -12,12 +12,6 @@ export interface PopularServer {
 // Popular Blossom servers for quick addition
 export const POPULAR_SERVERS: PopularServer[] = [
   { 
-    url: 'https://blossom.oxtr.dev', 
-    name: 'Oxtr',
-    pricing: 'free',
-    description: 'Free community server'
-  },
-  { 
     url: 'https://blossom.primal.net', 
     name: 'Primal',
     pricing: 'free',

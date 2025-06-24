@@ -1,30 +1,7 @@
 import { useState, useCallback } from 'react';
 import { queryRelays, publishToRelays, signEventWithMethod } from '../utils/nostr';
-import type { Event, Filter, UnsignedEvent } from 'nostr-tools';
-
-// NIP-01 + NIP-24 profile interface
-export interface UserProfile {
-  // NIP-01 basic fields
-  name?: string;
-  about?: string;
-  picture?: string;
-  
-  // NIP-24 extra fields
-  display_name?: string;
-  website?: string;
-  banner?: string;
-  bot?: boolean;
-  birthday?: {
-    year?: number;
-    month?: number;
-    day?: number;
-  };
-  
-  // Metadata
-  pubkey: string;
-  created_at: number;
-  event?: Event;
-}
+import type { UnsignedEvent, UserProfile } from '../types';
+import type { Filter } from 'nostr-tools';
 
 // Default relays for fetching user profiles
 const DEFAULT_PROFILE_RELAYS = [
@@ -70,19 +47,26 @@ export function useUserProfile() {
         // Parse the JSON content according to NIP-01 and NIP-24
         const profileData = JSON.parse(latestEvent.content);
         
-        // Clean up deprecated fields per NIP-24
+        // NIP-01 fields (these get their own UI sections)
+        const nip01Fields = new Set(['name', 'about', 'picture']);
+        
+        // Extract additional fields (everything else, including NIP-24 and custom fields)
+        const additionalFields: Record<string, any> = {};
+        Object.entries(profileData).forEach(([key, value]) => {
+          if (!nip01Fields.has(key)) {
+            additionalFields[key] = value;
+          }
+        });
+        
+        // Clean profile with only NIP-01 fields + additional fields
         const cleanedProfile: UserProfile = {
-          // NIP-01 basic fields
+          // NIP-01 basic fields (only these get dedicated UI)
           name: profileData.name,
           about: profileData.about,
           picture: profileData.picture,
           
-          // NIP-24 extra fields
-          display_name: profileData.display_name || profileData.displayName, // Handle deprecated displayName
-          website: profileData.website,
-          banner: profileData.banner,
-          bot: profileData.bot,
-          birthday: profileData.birthday,
+          // Everything else goes into additional fields
+          arbitraryFields: Object.keys(additionalFields).length > 0 ? additionalFields : undefined,
           
           // Metadata
           pubkey: latestEvent.pubkey,
@@ -132,19 +116,19 @@ export function useUserProfile() {
     setError(null);
 
     try {
-      // Create profile content according to NIP-01 and NIP-24
+      // Create profile content - NIP-01 fields + arbitrary fields
       const profileContent = {
         // NIP-01 basic fields
         ...(profileData.name && { name: profileData.name }),
         ...(profileData.about && { about: profileData.about }),
         ...(profileData.picture && { picture: profileData.picture }),
         
-        // NIP-24 extra fields
-        ...(profileData.display_name && { display_name: profileData.display_name }),
-        ...(profileData.website && { website: profileData.website }),
-        ...(profileData.banner && { banner: profileData.banner }),
-        ...(profileData.bot !== undefined && { bot: profileData.bot }),
-        ...(profileData.birthday && { birthday: profileData.birthday }),
+        // Include arbitrary fields (only non-empty values)
+        ...(profileData.arbitraryFields && Object.fromEntries(
+          Object.entries(profileData.arbitraryFields).filter(([, value]) => 
+            value !== null && value !== undefined && value !== ''
+          )
+        )),
       };
 
       // Create kind 0 event (user metadata)

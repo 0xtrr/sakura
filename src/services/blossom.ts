@@ -677,11 +677,6 @@ export class EnhancedBlossomAPI extends BlossomAPI {
 // Default Blossom servers
 export const DEFAULT_BLOSSOM_SERVERS: BlossomServer[] = [
   {
-    url: 'https://blossom.oxtr.dev',
-    name: 'Oxtr',
-    description: 'Oxtr Blossom server',
-  },
-  {
     url: 'https://blossom.primal.net',
     name: 'Primal',
     description: 'Primal Blossom server',

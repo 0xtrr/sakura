@@ -80,6 +80,22 @@ export interface User {
   loginMethod: 'extension' | 'nsec'; // Track how user logged in
 }
 
+// Profile interface - only NIP-01 fields get dedicated UI
+export interface UserProfile {
+  // NIP-01 basic fields (dedicated UI sections)
+  name?: string;
+  about?: string;
+  picture?: string;
+  
+  // All other fields (NIP-24, custom, etc.) go here
+  arbitraryFields?: Record<string, any>;
+  
+  // Metadata (not editable)
+  pubkey: string;
+  created_at: number;
+  event?: Event;
+}
+
 // Media types
 export interface MediaFile extends BlossomBlob {
   id: string;

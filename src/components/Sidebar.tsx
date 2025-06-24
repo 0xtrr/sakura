@@ -1,8 +1,8 @@
 import type { UserServerList } from '../types';
 
 interface SidebarProps {
-  currentView: 'grid' | 'upload' | 'settings';
-  onViewChange: (view: 'grid' | 'upload' | 'settings') => void;
+  currentView: 'grid' | 'upload' | 'profile' | 'settings';
+  onViewChange: (view: 'grid' | 'upload' | 'profile' | 'settings') => void;
   isOpen: boolean;
   onToggle: () => void;
   userServerList?: UserServerList | null;
@@ -39,6 +39,20 @@ export function Sidebar({ currentView, onViewChange, isOpen, onToggle, userServe
       ),
     },
     {
+      id: 'profile' as const,
+      label: 'Profile',
+      icon: (
+        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"
+          />
+        </svg>
+      ),
+    },
+    {
       id: 'settings' as const,
       label: 'Settings',
       icon: (
@@ -55,7 +69,7 @@ export function Sidebar({ currentView, onViewChange, isOpen, onToggle, userServe
     },
   ];
 
-  const handleItemClick = (id: 'grid' | 'upload' | 'settings') => {
+  const handleItemClick = (id: 'grid' | 'upload' | 'profile' | 'settings') => {
     onViewChange(id);
     onToggle(); // Close sidebar on mobile after selection
   };

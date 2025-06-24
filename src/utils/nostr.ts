@@ -346,8 +346,62 @@ export async function signEvent(event: UnsignedEvent): Promise<Event> {
   throw new Error('No signing method available. Please connect with Nostr extension or enter your private key.');
 }
 
+// Cache for Blossom auth events to avoid creating duplicate events for the same operation
+interface CachedAuthEvent {
+  event: BlossomAuthEvent;
+  expires: number; // Unix timestamp
+}
+
+const authEventCache = new Map<string, CachedAuthEvent>();
+
+// Clean up expired cache entries periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, cached] of authEventCache.entries()) {
+    if (now >= cached.expires) {
+      authEventCache.delete(key);
+    }
+  }
+}, 60000); // Clean up every minute
+
+/**
+ * Gets a cached auth event if available and not expired
+ */
+function getCachedAuthEvent(action: string, method: string, sha256?: string): BlossomAuthEvent | null {
+  const cacheKey = `${action}:${method}:${sha256 || 'none'}`;
+  const cached = authEventCache.get(cacheKey);
+  
+  if (cached && Date.now() < cached.expires) {
+    return cached.event;
+  }
+  
+  // Remove expired entry
+  if (cached) {
+    authEventCache.delete(cacheKey);
+  }
+  
+  return null;
+}
+
+/**
+ * Caches an auth event with expiration
+ */
+function cacheAuthEvent(action: string, method: string, event: BlossomAuthEvent, sha256?: string): void {
+  const cacheKey = `${action}:${method}:${sha256 || 'none'}`;
+  // Cache until 30 seconds before the event's actual expiration to ensure validity
+  const expirationTag = event.tags.find(tag => tag[0] === 'expiration');
+  const eventExpires = expirationTag ? parseInt(expirationTag[1]) * 1000 : Date.now() + 270000; // 4.5 minutes default
+  const cacheExpires = eventExpires - 30000; // 30 seconds buffer
+  
+  authEventCache.set(cacheKey, {
+    event,
+    expires: cacheExpires
+  });
+}
+
 /**
  * Creates a Blossom authentication event following BUD-02 specification
+ * Implements caching to avoid creating duplicate events for the same operation
  */
 export async function createBlossomAuthEvent(
   action: 'upload' | 'list' | 'delete',
@@ -355,6 +409,12 @@ export async function createBlossomAuthEvent(
   sha256?: string,
   content?: string
 ): Promise<BlossomAuthEvent> {
+  // Check cache first
+  const cachedEvent = getCachedAuthEvent(action, method, sha256);
+  if (cachedEvent) {
+    return cachedEvent;
+  }
+
   const now = Math.floor(Date.now() / 1000);
   const expirationTime = now + 300; // 5 minutes
 
@@ -376,7 +436,12 @@ export async function createBlossomAuthEvent(
   };
 
   const signedEvent = await signEventWithMethod(unsignedEvent, method);
-  return signedEvent as BlossomAuthEvent;
+  const authEvent = signedEvent as BlossomAuthEvent;
+  
+  // Cache the event for reuse
+  cacheAuthEvent(action, method, authEvent, sha256);
+  
+  return authEvent;
 }
 
 /**
@@ -395,6 +460,7 @@ const DEFAULT_PROFILE_RELAYS = [
   'wss://relay.primal.net',
   'wss://relay.snort.social',
   'wss://nos.lol',
+  'wss://nostr.oxtr.dev',
 ];
 
 /**
@@ -524,6 +590,7 @@ const DEFAULT_DISCOVERY_RELAYS = [
   'wss://relay.primal.net',
   'wss://relay.snort.social',
   'wss://nos.lol',
+  'wss://nostr.oxtr.dev',
 ];
 
 /**

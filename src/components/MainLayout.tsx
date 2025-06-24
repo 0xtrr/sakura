@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { MediaGrid } from './MediaGrid.tsx';
 import { UploadZone } from './UploadZone.tsx';
+import { Profile } from './Profile.tsx';
 import { Settings } from './Settings.tsx';
 import { Header } from './Header.tsx';
 import { Sidebar } from './Sidebar.tsx';
@@ -13,7 +14,7 @@ import type { UserServerList, RelayMetadata } from '../types';
 
 export function MainLayout() {
   const { user, getSigningMethod } = useAuth();
-  const [view, setView] = useState<'grid' | 'upload' | 'settings'>('grid');
+  const [view, setView] = useState<'grid' | 'upload' | 'profile' | 'settings'>('grid');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [userServerList, setUserServerList] = useState<UserServerList | null>(null);
   const [loading, setLoading] = useState(false);
@@ -125,9 +126,8 @@ export function MainLayout() {
     }
   };
 
-  const handleOnboardingSkip = () => {
-    console.log('⏭️ MAINLAYOUT: User skipped onboarding');
-    setShowRelayOnboarding(false);
+  const handleServerOnboardingSkip = () => {
+    console.log('⏭️ MAINLAYOUT: User skipped server onboarding');
     setShowServerOnboarding(false);
   };
 
@@ -136,7 +136,6 @@ export function MainLayout() {
     return (
       <RelayOnboarding
         onComplete={handleRelayOnboardingComplete}
-        onSkip={handleOnboardingSkip}
       />
     );
   }
@@ -146,7 +145,7 @@ export function MainLayout() {
     return (
       <ServerOnboarding
         onComplete={handleServerOnboardingComplete}
-        onCancel={handleOnboardingSkip}
+        onCancel={handleServerOnboardingSkip}
       />
     );
   }
@@ -166,7 +165,7 @@ export function MainLayout() {
   return (
     <div className="h-screen bg-gray-50 flex flex-col">
       {/* Fixed Header */}
-      <Header userServerList={userServerList} />
+      <Header />
       
       <div className="flex flex-1 overflow-hidden">
         <Sidebar 
@@ -204,6 +203,7 @@ export function MainLayout() {
             <div className="max-w-7xl mx-auto">
               {view === 'grid' && <MediaGrid userServerList={userServerList} />}
               {view === 'upload' && <UploadZone userServerList={userServerList} />}
+              {view === 'profile' && <Profile userServerList={userServerList} />}
               {view === 'settings' && <Settings userServerList={userServerList} onUserServerListChange={setUserServerList} />}
             </div>
           </div>
