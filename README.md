@@ -1,6 +1,6 @@
 # Sakura
 
-A decentralized media manager using [Nostr](https://nostr.com/) for authentication and [Blossom](https://github.com/hzrd149/blossom) for file storage.
+A decentralized media manager using [Nostr](https://github.com/nostr-protocol/nostr) for authentication and [Blossom](https://github.com/hzrd149/blossom) for file storage.
 
 ## Features
 
