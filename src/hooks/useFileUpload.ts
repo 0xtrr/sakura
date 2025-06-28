@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useAuth } from './useAuth';
 import { useMediaCache } from './useMediaCache';
 import { DEFAULT_BLOSSOM_SERVERS, createBlossomAPI, EnhancedBlossomAPI } from '../services/blossom';
@@ -268,7 +268,7 @@ export function useFileUpload({
     setUploads([]);
   }, []);
 
-  return {
+  return useMemo(() => ({
     uploads,
     uploadFile,
     uploadFiles,
@@ -278,5 +278,5 @@ export function useFileUpload({
     clearCompletedUploads,
     clearAllUploads,
     processFile
-  };
+  }), [uploads, uploadFile, uploadFiles, addUpload, removeUpload, updateUploadProgress, clearCompletedUploads, clearAllUploads, processFile]);
 }

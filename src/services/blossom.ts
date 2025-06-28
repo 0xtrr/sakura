@@ -3,6 +3,7 @@ import { createBlossomAuthEvent, encodeAuthEvent } from '../utils/nostr';
 import { generateFallbackUrls, fetchWithFallback, extractSha256FromUrl } from '../utils/serverList';
 import { calculateSHA256 } from '../utils/fileUtils';
 import { serverListService } from './serverList';
+import { requestDeduplicator, createRequestKey } from '../utils/requestDeduplication';
 import type { UserServerList } from '../types';
 
 /**
@@ -291,6 +292,8 @@ export class EnhancedBlossomAPI extends BlossomAPI {
   /**
    * List blobs from ALL servers in user's server list
    * Merges results and tracks which servers have each file
+   * Optimized to reuse a single authorization event across all servers
+   * Uses request deduplication to prevent multiple identical requests
    */
   async listBlobsFromAllServers(pubkey: string, signingMethod: 'extension' | 'nsec'): Promise<BlossomBlob[]> {
     if (!this.userServerList || this.userServerList.servers.length === 0) {
@@ -305,128 +308,158 @@ export class EnhancedBlossomAPI extends BlossomAPI {
       }));
     }
 
-    console.log(`Fetching blobs from ALL ${this.userServerList.servers.length} servers...`);
+    // Create a unique key for this request to enable deduplication
+    const requestKey = createRequestKey([
+      'listBlobsFromAllServers',
+      pubkey,
+      signingMethod,
+      JSON.stringify([...this.userServerList.servers].sort()) // Normalize server order
+    ]);
 
-    // Deduplicate server URLs to prevent querying the same server multiple times
-    const uniqueServers = [...new Set(this.userServerList.servers)];
-    console.log(`After deduplication: ${uniqueServers.length} unique servers`);
+    return requestDeduplicator.deduplicate(requestKey, async () => {
+      console.log(`Fetching blobs from ALL ${this.userServerList!.servers.length} servers...`);
 
-    // Create promises to fetch from all servers
-    const fetchPromises = uniqueServers.map(async (serverUrl): Promise<{
-      serverUrl: string;
-      serverName: string;
-      blobs?: BlossomBlob[];
-      error?: string;
-      success: boolean;
-    }> => {
-      try {
-        console.log(`Fetching blobs from: ${serverUrl}`);
-        const tempAPI = new BlossomAPI({ url: serverUrl, name: 'temp' });
-        const blobs = await tempAPI.listBlobs(pubkey, signingMethod);
-        console.log(`✅ Successfully fetched ${blobs.length} blobs from: ${serverUrl}`);
-        
-        // Get server name from URL
-        const serverName = new URL(serverUrl).hostname;
-        
-        return { 
-          serverUrl, 
-          serverName,
-          blobs, 
-          success: true 
-        };
-      } catch (error) {
-        const serverName = new URL(serverUrl).hostname;
-        const errorMessage = error instanceof Error ? error.message : 'Failed to fetch';
-        console.warn(`❌ Failed to fetch from ${serverUrl}:`, error);
-        return { 
-          serverUrl, 
-          serverName,
-          error: errorMessage, 
-          success: false 
-        };
-      }
-    });
+      // Deduplicate server URLs to prevent querying the same server multiple times
+      const uniqueServers = [...new Set(this.userServerList!.servers)];
+      console.log(`After deduplication: ${uniqueServers.length} unique servers`);
 
-    // Wait for all fetch operations to complete
-    const results = await Promise.allSettled(fetchPromises);
+      // Create a single authorization event to reuse across all servers
+      const authEvent = await createBlossomAuthEvent('list', signingMethod, undefined, 'List Blobs');
+      const authHeader = encodeAuthEvent(authEvent);
+      console.log('📝 Created single auth event for reuse across all servers');
 
-    // Process results and build server availability map
-    const serverResults: Array<{
-      serverUrl: string;
-      serverName: string;
-      blobs?: BlossomBlob[];
-      error?: string;
-      success: boolean;
-    }> = [];
-
-    results.forEach((result) => {
-      if (result.status === 'fulfilled') {
-        serverResults.push(result.value);
-      } else {
-        // This shouldn't happen since we catch all errors above
-        serverResults.push({
-          serverUrl: 'unknown',
-          serverName: 'unknown',
-          error: result.reason,
-          success: false
-        });
-      }
-    });
-
-    // Merge blobs and track server availability
-    const blobMap = new Map<string, BlossomBlob>();
-
-    serverResults.forEach((serverResult) => {
-      if (serverResult.success && serverResult.blobs) {
-        serverResult.blobs.forEach((blob) => {
-          const existingBlob = blobMap.get(blob.sha256);
+      // Create promises to fetch from all servers using the same auth event
+      const fetchPromises = uniqueServers.map(async (serverUrl): Promise<{
+        serverUrl: string;
+        serverName: string;
+        blobs?: BlossomBlob[];
+        error?: string;
+        success: boolean;
+      }> => {
+        try {
+          console.log(`Fetching blobs from: ${serverUrl}`);
           
-          if (existingBlob) {
-            // Add this server to the availability list if not already present
-            if (!existingBlob.availableServers) {
-              existingBlob.availableServers = [];
-            }
-            
-            // Check if this server is already in the list
-            const serverAlreadyExists = existingBlob.availableServers.some(
-              server => server.serverUrl === serverResult.serverUrl
-            );
-            
-            if (!serverAlreadyExists) {
-              existingBlob.availableServers.push({
-                serverUrl: serverResult.serverUrl,
-                serverName: serverResult.serverName,
-                success: true
-              });
-            } else {
-              console.warn(`Duplicate server detected for blob ${blob.sha256}: ${serverResult.serverName}`);
-            }
-          } else {
-            // First time seeing this blob
-            blobMap.set(blob.sha256, {
-              ...blob,
-              availableServers: [{
-                serverUrl: serverResult.serverUrl,
-                serverName: serverResult.serverName,
-                success: true
-              }]
-            });
+          // Use the shared auth event instead of creating a new one per server
+          const baseUrl = normalizeBaseUrl(serverUrl);
+          const url = `${baseUrl}/list/${pubkey}`;
+          
+          const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+              'Authorization': `Nostr ${authHeader}`,
+            },
+          });
+
+          if (!response.ok) {
+            throw new Error(`Failed to list blobs: ${response.status}`);
           }
-        });
+
+          const blobs = await response.json();
+          console.log(`✅ Successfully fetched ${blobs.length} blobs from: ${serverUrl}`);
+          
+          // Get server name from URL
+          const serverName = new URL(serverUrl).hostname;
+          
+          return { 
+            serverUrl, 
+            serverName,
+            blobs, 
+            success: true 
+          };
+        } catch (error) {
+          const serverName = new URL(serverUrl).hostname;
+          const errorMessage = error instanceof Error ? error.message : 'Failed to fetch';
+          console.warn(`❌ Failed to fetch from ${serverUrl}:`, error);
+          return { 
+            serverUrl, 
+            serverName,
+            error: errorMessage, 
+            success: false 
+          };
+        }
+      });
+
+      // Wait for all fetch operations to complete
+      const results = await Promise.allSettled(fetchPromises);
+
+      // Process results and build server availability map
+      const serverResults: Array<{
+        serverUrl: string;
+        serverName: string;
+        blobs?: BlossomBlob[];
+        error?: string;
+        success: boolean;
+      }> = [];
+
+      results.forEach((result) => {
+        if (result.status === 'fulfilled') {
+          serverResults.push(result.value);
+        } else {
+          // This shouldn't happen since we catch all errors above
+          serverResults.push({
+            serverUrl: 'unknown',
+            serverName: 'unknown',
+            error: result.reason,
+            success: false
+          });
+        }
+      });
+
+      // Merge blobs and track server availability
+      const blobMap = new Map<string, BlossomBlob>();
+
+      serverResults.forEach((serverResult) => {
+        if (serverResult.success && serverResult.blobs) {
+          serverResult.blobs.forEach((blob) => {
+            const existingBlob = blobMap.get(blob.sha256);
+            
+            if (existingBlob) {
+              // Add this server to the availability list if not already present
+              if (!existingBlob.availableServers) {
+                existingBlob.availableServers = [];
+              }
+              
+              // Check if this server is already in the list
+              const serverAlreadyExists = existingBlob.availableServers.some(
+                server => server.serverUrl === serverResult.serverUrl
+              );
+              
+              if (!serverAlreadyExists) {
+                existingBlob.availableServers.push({
+                  serverUrl: serverResult.serverUrl,
+                  serverName: serverResult.serverName,
+                  success: true
+                });
+              } else {
+                console.warn(`Duplicate server detected for blob ${blob.sha256}: ${serverResult.serverName}`);
+              }
+            } else {
+              // First time seeing this blob
+              blobMap.set(blob.sha256, {
+                ...blob,
+                availableServers: [{
+                  serverUrl: serverResult.serverUrl,
+                  serverName: serverResult.serverName,
+                  success: true
+                }]
+              });
+            }
+          });
+        }
+      });
+
+      // Also track failed servers for transparency
+      const failedServers = serverResults.filter(r => !r.success);
+      if (failedServers.length > 0) {
+        console.log(`Failed to fetch from ${failedServers.length} servers:`, 
+          failedServers.map(f => `${f.serverName}: ${f.error}`).join(', '));
       }
+
+      const mergedBlobs = Array.from(blobMap.values());
+      console.log(`Merged ${mergedBlobs.length} unique blobs from ${serverResults.filter(r => r.success).length} servers`);
+
+      return mergedBlobs;
     });
-
-    // Also track failed servers for transparency
-    const failedServers = serverResults.filter(r => !r.success);
-    if (failedServers.length > 0) {
-      console.log(`Failed to fetch from ${failedServers.length} servers:`, 
-        failedServers.map(f => `${f.serverName}: ${f.error}`).join(', '));
-    }
-
-    const mergedBlobs = Array.from(blobMap.values());
-    console.log(`Merged ${mergedBlobs.length} unique blobs from ${serverResults.filter(r => r.success).length} servers`);
-
-    return mergedBlobs;
   }
 
   /**
@@ -654,6 +687,7 @@ export class EnhancedBlossomAPI extends BlossomAPI {
 
   /**
    * Delete blob with sequential server fallback
+   * Optimized to reuse a single authorization event across all servers
    */
   async deleteBlobWithFallback(sha256: string, signingMethod: 'extension' | 'nsec'): Promise<void> {
     if (!this.userServerList || this.userServerList.servers.length === 0) {
@@ -663,12 +697,31 @@ export class EnhancedBlossomAPI extends BlossomAPI {
     let lastError: Error | null = null;
     let successCount = 0;
 
+    // Create a single authorization event to reuse across all servers
+    const authEvent = await createBlossomAuthEvent('delete', signingMethod, sha256, `Delete ${sha256}`);
+    const authHeader = encodeAuthEvent(authEvent);
+    console.log('📝 Created single delete auth event for reuse across all servers');
+
     // Try to delete from all servers where the blob might exist
     for (const serverUrl of this.userServerList.servers) {
       try {
         console.log(`Attempting to delete from: ${serverUrl}`);
-        const tempAPI = new BlossomAPI({ url: serverUrl, name: 'temp' });
-        await tempAPI.deleteBlob(sha256, signingMethod);
+        
+        // Use the shared auth event instead of creating a new one per server
+        const baseUrl = normalizeBaseUrl(serverUrl);
+        const url = `${baseUrl}/${sha256}`;
+        
+        const response = await fetch(url, {
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Nostr ${authHeader}`,
+          },
+        });
+
+        if (!response.ok) {
+          throw new Error(`Failed to delete blob: ${response.status}`);
+        }
+        
         successCount++;
         console.log(`Successfully deleted from: ${serverUrl}`);
       } catch (error) {
@@ -715,12 +768,35 @@ export class EnhancedBlossomAPI extends BlossomAPI {
 
     console.log(`🪞 Mirroring blob ${blobHash} from ${sourceServer} to ${targetServers.length} servers...`);
 
-    // Create mirror promises for all target servers
+    // Create a single authorization event to reuse across all target servers
+    const authEvent = await createBlossomAuthEvent('upload', signingMethod, blobHash, `Mirror blob ${blobHash}`);
+    const authHeader = encodeAuthEvent(authEvent);
+    console.log('📝 Created single mirror auth event for reuse across all target servers');
+
+    // Create mirror promises for all target servers using the shared auth event
     const mirrorPromises = targetServers.map(async (serverUrl): Promise<{ serverUrl: string; result?: BlossomUploadResponse; error?: Error; success: boolean }> => {
       try {
         console.log(`🪞 Starting mirror to: ${serverUrl}`);
-        const tempAPI = new BlossomAPI({ url: serverUrl, name: 'temp' });
-        const result = await tempAPI.mirrorBlob(sourceUrl, signingMethod);
+        
+        // Use the shared auth event instead of creating a new one per server
+        const baseUrl = normalizeBaseUrl(serverUrl);
+        const url = `${baseUrl}/mirror`;
+        
+        const response = await fetch(url, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Nostr ${authHeader}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ url: sourceUrl }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          throw new Error(`Mirror failed: ${response.status} ${errorText}`);
+        }
+
+        const result = await response.json();
         console.log(`✅ Successfully mirrored to: ${serverUrl}`);
         return { serverUrl, result, success: true };
       } catch (error) {

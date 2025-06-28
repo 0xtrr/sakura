@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, type ReactNode } from 'react';
 import type { AuthContextType, User } from '../types';
 import { 
   getPublicKey, 
@@ -45,7 +45,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     setLoading(false);
   }, []);
 
-  const loadUser = async (pubkey: string, method: 'extension' | 'nsec') => {
+  const loadUser = useCallback(async (pubkey: string, method: 'extension' | 'nsec') => {
     try {
       console.log('Loading user profile for:', pubkey.slice(0, 8) + '...', 'via', method);
       const profile = await getUserProfile(pubkey);
@@ -71,9 +71,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const login = async () => {
+  const login = useCallback(async () => {
     if (!isNostrAvailable()) {
       throw new Error('Nostr extension not found. Please install Alby, nos2x, or another Nostr extension.');
     }
@@ -86,18 +86,18 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setLoading(false);
       throw error;
     }
-  };
+  }, [loadUser]);
 
-  const logout = () => {
+  const logout = useCallback(() => {
     setUser(null);
     setLoginMethod(null);
     setNeedsPassword(false);
     localStorage.removeItem('sakura_pubkey');
     localStorage.removeItem('sakura_login_method');
     clearSessionPrivateKey(); // Clear session key but keep encrypted storage
-  };
+  }, []);
 
-  const loginWithPrivateKey = async (nsec: string, password: string) => {
+  const loginWithPrivateKey = useCallback(async (nsec: string, password: string) => {
     if (!isValidNsec(nsec)) {
       throw new Error('Invalid nsec format. Please check your private key.');
     }
@@ -124,9 +124,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setLoading(false);
       throw error;
     }
-  };
+  }, [loadUser]);
 
-  const unlockWithPassword = async (password: string) => {
+  const unlockWithPassword = useCallback(async (password: string) => {
     if (!password) {
       throw new Error('Password is required');
     }
@@ -147,19 +147,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setNeedsPassword(true);
       throw error;
     }
-  };
+  }, [loadUser]);
 
-  const getSigningMethod = (): 'extension' | 'nsec' | null => {
+  const getSigningMethod = useCallback((): 'extension' | 'nsec' | null => {
     return loginMethod;
-  };
+  }, [loginMethod]);
 
-  const refreshUserProfile = async () => {
+  const refreshUserProfile = useCallback(async () => {
     if (user && loginMethod) {
       await loadUser(user.pubkey, loginMethod);
     }
-  };
+  }, [user, loginMethod, loadUser]);
 
-  const value: AuthContextType = {
+  const value: AuthContextType = useMemo(() => ({
     user,
     isAuthenticated: !!user,
     login,
@@ -170,7 +170,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     needsPassword,
     getSigningMethod,
     refreshUserProfile,
-  };
+  }), [user, login, loginWithPrivateKey, unlockWithPassword, logout, loading, needsPassword, getSigningMethod, refreshUserProfile]);
 
   return (
     <AuthContext.Provider value={value}>

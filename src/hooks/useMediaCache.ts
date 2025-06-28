@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useMemo } from 'react';
 import { useAuth } from './useAuth';
 import { EnhancedBlossomAPI } from '../services/blossom';
 import type { BlossomBlob, UserServerList } from '../types';
@@ -147,7 +147,7 @@ export function useMediaCache() {
     lastServerListRef.current = null;
   }, []);
 
-  return {
+  return useMemo(() => ({
     media: state.media,
     loading: state.loading,
     error: state.error,
@@ -159,5 +159,17 @@ export function useMediaCache() {
     removeMedia,
     markStale,
     clearCache
-  };
+  }), [
+    state.media,
+    state.loading,
+    state.error,
+    state.lastFetched,
+    state.isStale,
+    isDataStale,
+    fetchMedia,
+    addMedia,
+    removeMedia,
+    markStale,
+    clearCache
+  ]);
 }

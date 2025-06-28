@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { BlossomBlob } from '../types';
 
 interface ServerAvailabilityIndicatorProps {
@@ -5,7 +6,10 @@ interface ServerAvailabilityIndicatorProps {
   className?: string;
 }
 
-export function ServerAvailabilityIndicator({ availableServers, className = '' }: ServerAvailabilityIndicatorProps) {
+export const ServerAvailabilityIndicator = memo(function ServerAvailabilityIndicator({ 
+  availableServers, 
+  className = '' 
+}: ServerAvailabilityIndicatorProps) {
   if (!availableServers || availableServers.length === 0) {
     return null;
   }
@@ -57,4 +61,4 @@ export function ServerAvailabilityIndicator({ availableServers, className = '' }
       )}
     </div>
   );
-}
+});
