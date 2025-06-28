@@ -42,6 +42,9 @@ export function parseServerListEvent(event: ServerListEvent): UserServerList {
     .filter(tag => tag[0] === 'server' && tag[1])
     .map(tag => tag[1]);
 
+  console.log('🔍 parseServerListEvent: Raw event tags:', event.tags);
+  console.log('🔍 parseServerListEvent: Parsed servers (in order):', servers);
+
   return {
     servers,
     pubkey: event.pubkey,

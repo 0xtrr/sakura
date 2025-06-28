@@ -21,6 +21,12 @@ export function ServerManagement({
   const [servers, setServers] = useState<string[]>(
     userServerList?.servers || []
   );
+
+  // Debug log when servers change
+  useEffect(() => {
+    console.log('🔍 ServerManagement: servers state updated:', servers);
+    console.log('🔍 ServerManagement: userServerList?.servers:', userServerList?.servers);
+  }, [servers, userServerList]);
   const [newServerUrl, setNewServerUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);

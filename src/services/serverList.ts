@@ -34,44 +34,94 @@ export class ServerListService {
   }
 
   /**
+   * Query individual relays to debug server ordering issues
+   */
+  private async queryRelaysIndividually(relayUrls: string[], pubkey: string): Promise<UserServerList | null> {
+    console.log(`🔍 Querying ${relayUrls.length} relays individually for server list debug...`);
+    
+    const allEvents: Array<{ relay: string; event: any; servers: string[] }> = [];
+    
+    for (const relayUrl of relayUrls) {
+      try {
+        console.log(`🔎 Querying relay: ${relayUrl}`);
+        const events = await queryRelays([relayUrl], {
+          kinds: [10063],
+          authors: [pubkey],
+          limit: 1
+        }, 3000); // 3 second timeout per relay
+        
+        if (events.length > 0) {
+          const event = events[0];
+          const servers = event.tags
+            .filter((tag: string[]) => tag[0] === 'server' && tag[1])
+            .map((tag: string[]) => tag[1]);
+          
+          console.log(`📋 ${relayUrl} returned event created at ${new Date(event.created_at * 1000).toISOString()}`);
+          console.log(`📋 ${relayUrl} server order:`, servers);
+          
+          allEvents.push({ relay: relayUrl, event, servers });
+        } else {
+          console.log(`❌ ${relayUrl} returned no events`);
+        }
+      } catch (error) {
+        console.error(`❌ Failed to query ${relayUrl}:`, error);
+      }
+    }
+    
+    if (allEvents.length === 0) {
+      console.log('❌ No events found from any relay');
+      return null;
+    }
+    
+    // Find the most recent event across all relays
+    const latestEventInfo = allEvents.sort((a, b) => b.event.created_at - a.event.created_at)[0];
+    
+    console.log(`🏆 Using most recent event from ${latestEventInfo.relay} (${new Date(latestEventInfo.event.created_at * 1000).toISOString()})`);
+    console.log(`🏆 Final server order:`, latestEventInfo.servers);
+    
+    // Check for inconsistencies
+    const uniqueOrders = new Set(allEvents.map(e => JSON.stringify(e.servers)));
+    if (uniqueOrders.size > 1) {
+      console.warn(`⚠️ INCONSISTENT SERVER ORDERS DETECTED across ${allEvents.length} relays!`);
+      allEvents.forEach(({ relay, servers, event }) => {
+        console.warn(`⚠️ ${relay}: [${servers.join(', ')}] (created: ${new Date(event.created_at * 1000).toISOString()})`);
+      });
+    } else {
+      console.log(`✅ All ${allEvents.length} relays have consistent server order`);
+    }
+    
+    return parseServerListEvent(latestEventInfo.event as ServerListEvent);
+  }
+
+  /**
    * Get user's server list from Nostr relays with hybrid approach
    */
   async getUserServerList(pubkey: string): Promise<UserServerList | null> {
     try {
-      // First try default discovery relays
-      let events = await queryRelays(this._defaultRelayUrls, {
-        kinds: [10063],
-        authors: [pubkey],
-        limit: 1
-      });
+      // First try default discovery relays with individual debugging
+      console.log('🔍 Checking default discovery relays...');
+      let result = await this.queryRelaysIndividually(this._defaultRelayUrls, pubkey);
+      
+      if (result) {
+        return result;
+      }
 
-      // If not found, try to get user's relay list and check those
-      if (events.length === 0) {
-        console.log(`No server list found in default relays, checking user's relay list...`);
-        const userRelayList = await getUserRelayList(pubkey);
+      // If not found, try user's relay list
+      console.log(`No server list found in default relays, checking user's relay list...`);
+      const userRelayList = await getUserRelayList(pubkey);
+      
+      if (userRelayList) {
+        const userRelayUrls = Object.keys(userRelayList.relays);
+        console.log(`Found user relay list with ${userRelayUrls.length} relays, checking for server list...`);
         
-        if (userRelayList) {
-          const userRelayUrls = Object.keys(userRelayList.relays);
-          console.log(`Found user relay list with ${userRelayUrls.length} relays, checking for server list...`);
-          
-          events = await queryRelays(userRelayUrls, {
-            kinds: [10063],
-            authors: [pubkey],
-            limit: 1
-          });
+        result = await this.queryRelaysIndividually(userRelayUrls, pubkey);
+        if (result) {
+          return result;
         }
       }
 
-      if (events.length === 0) {
-        console.log(`No server list found for user ${pubkey}`);
-        return null;
-      }
-
-      // Get the most recent event
-      const latestEvent = events.sort((a, b) => b.created_at - a.created_at)[0];
-      
-      // Parse the server list from the event
-      return parseServerListEvent(latestEvent as ServerListEvent);
+      console.log(`No server list found for user ${pubkey}`);
+      return null;
     } catch (error) {
       console.error('Failed to fetch user server list:', error);
       return null;
@@ -199,6 +249,11 @@ export class ServerListService {
    */
   private async publishEvent(event: Event): Promise<void> {
     try {
+      console.log('🔍 ServerListService: Publishing to relays:', this.publishRelayUrls);
+      console.log('🔍 ServerListService: _publishRelayUrls:', this._publishRelayUrls);
+      console.log('🔍 ServerListService: _defaultRelayUrls:', this._defaultRelayUrls);
+      console.log('🔍 ServerListService: Event to publish:', event);
+      
       await publishToRelays(this.publishRelayUrls, event);
       console.log('Successfully published server list event to relays');
     } catch (error) {
@@ -226,25 +281,29 @@ export class ServerListService {
    */
   async setPublishRelaysFromUserList(pubkey: string): Promise<boolean> {
     try {
-      const userRelayList = await getUserRelayList(pubkey);
+      console.log('🔍 ServerListService: Getting user relay list for publish relays (cached)...');
+      const userRelayList = await getUserRelayList(pubkey); // Will use cache if available
+      console.log('🔍 ServerListService: User relay list:', userRelayList);
       
       if (userRelayList) {
-        // Get relays that support write operations
-        const writeRelays = Object.entries(userRelayList.relays)
-          .filter(([, metadata]) => metadata.write !== false)
-          .map(([url]) => url);
+        // Use ALL user relays for publishing (like RelayManagement does)
+        // NIP-65: If write is not specified, assume both read and write are supported
+        const allRelays = Object.keys(userRelayList.relays);
         
-        if (writeRelays.length > 0) {
-          this.setPublishRelayUrls(writeRelays);
-          console.log(`Set publish relays from user list: ${writeRelays.length} relays`);
+        console.log('🔍 ServerListService: ALL user relays for publishing:', allRelays);
+        
+        if (allRelays.length > 0) {
+          this.setPublishRelayUrls(allRelays);
+          console.log(`✅ Set publish relays to ALL user relays: ${allRelays.length} relays`);
+          console.log('🔍 ServerListService: _publishRelayUrls after setting:', this._publishRelayUrls);
           return true;
         }
       }
       
-      console.log('No user relay list found, using default relays for publishing');
+      console.log('⚠️ No user relay list found, using default relays for publishing');
       return false;
     } catch (error) {
-      console.error('Failed to set publish relays from user list:', error);
+      console.error('❌ Failed to set publish relays from user list:', error);
       return false;
     }
   }

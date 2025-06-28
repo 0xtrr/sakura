@@ -36,8 +36,8 @@ export function useMediaCache() {
     // Check if cache has expired
     if (Date.now() - lastFetchedRef.current > CACHE_DURATION) return true;
     
-    // Check if server list has changed
-    const currentServerListKey = userServerList ? JSON.stringify(userServerList.servers.sort()) : null;
+    // Check if server list has changed (create copy to avoid mutating original order)
+    const currentServerListKey = userServerList ? JSON.stringify([...userServerList.servers].sort()) : null;
     if (lastServerListRef.current !== currentServerListKey) {
       lastServerListRef.current = currentServerListKey;
       return true;

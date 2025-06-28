@@ -51,6 +51,7 @@ export function MainLayout() {
       console.log('🗂️ MAINLAYOUT: User server list result:', serverList);
       
       if (serverList && serverList.servers.length > 0) {
+        console.log('🔍 MAINLAYOUT: Server list order before setting state:', serverList.servers);
         setUserServerList(serverList);
         console.log(`✅ MAINLAYOUT: Loaded user server list with ${serverList.servers.length} servers`);
       } else {

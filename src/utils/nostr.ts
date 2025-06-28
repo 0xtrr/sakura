@@ -561,18 +561,34 @@ export async function publishToRelays(
   event: Event,
   timeout = 10000
 ): Promise<void> {
+  console.log(`📡 publishToRelays: Publishing event kind ${event.kind} to ${relayUrls.length} relays:`, relayUrls);
+  
   const pool = new SimplePool();
   
   try {
     const promises = pool.publish(relayUrls, event);
     
-    // Wait for at least one relay to confirm
-    await Promise.race([
-      Promise.allSettled(promises),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Publish timeout')), timeout)
-      )
-    ]);
+    // Wait for all promises to settle so we can see individual results
+    const results = await Promise.allSettled(promises);
+    
+    let successCount = 0;
+    let failureCount = 0;
+    
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        successCount++;
+        console.log(`✅ Published to ${relayUrls[index]}: Success`);
+      } else {
+        failureCount++;
+        console.error(`❌ Failed to publish to ${relayUrls[index]}:`, result.reason);
+      }
+    });
+    
+    console.log(`📊 Publish results: ${successCount} success, ${failureCount} failed out of ${relayUrls.length} relays`);
+    
+    if (successCount === 0) {
+      throw new Error('Failed to publish to any relays');
+    }
   } catch (error) {
     console.error('Failed to publish to relays:', error);
     throw error;
@@ -593,11 +609,38 @@ const DEFAULT_DISCOVERY_RELAYS = [
   'wss://nostr.oxtr.dev',
 ];
 
+// Cache for user relay lists - expires after 5 minutes
+const relayListCache = new Map<string, { data: UserRelayList | null; timestamp: number }>();
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Clear the relay list cache for a specific user or all users
+ */
+export function clearRelayListCache(pubkey?: string): void {
+  if (pubkey) {
+    relayListCache.delete(pubkey);
+    console.log(`🗑️ Cleared relay list cache for ${pubkey.slice(0, 8)}...${pubkey.slice(-8)}`);
+  } else {
+    relayListCache.clear();
+    console.log('🗑️ Cleared all relay list cache');
+  }
+}
+
 /**
  * Gets user's relay list from Nostr relays (NIP-65 kind 10002 events)
+ * Cached for 5 minutes to avoid excessive relay queries
  */
-export async function getUserRelayList(pubkey: string): Promise<UserRelayList | null> {
-  console.log(`🔍 getUserRelayList: Starting search for pubkey ${pubkey.slice(0, 8)}...${pubkey.slice(-8)}`);
+export async function getUserRelayList(pubkey: string, forceRefresh = false): Promise<UserRelayList | null> {
+  // Check cache first (unless force refresh)
+  if (!forceRefresh) {
+    const cached = relayListCache.get(pubkey);
+    if (cached && (Date.now() - cached.timestamp) < CACHE_DURATION) {
+      console.log(`💾 getUserRelayList: Using cached relay list for ${pubkey.slice(0, 8)}...${pubkey.slice(-8)}`);
+      return cached.data;
+    }
+  }
+
+  console.log(`🔍 getUserRelayList: ${forceRefresh ? 'Force refreshing' : 'Fetching'} relay list for pubkey ${pubkey.slice(0, 8)}...${pubkey.slice(-8)}`);
   console.log(`📡 Using discovery relays:`, DEFAULT_DISCOVERY_RELAYS);
   
   try {
@@ -624,9 +667,16 @@ export async function getUserRelayList(pubkey: string): Promise<UserRelayList | 
     const relayList = parseRelayListEvent(latestEvent as RelayListEvent);
     console.log(`📊 Parsed relay list with ${Object.keys(relayList.relays).length} relays:`, Object.keys(relayList.relays));
     
+    // Cache the result
+    relayListCache.set(pubkey, { data: relayList, timestamp: Date.now() });
+    
     return relayList;
   } catch (error) {
     console.error('❌ Failed to fetch user relay list:', error);
+    
+    // Cache null result to avoid repeated failures
+    relayListCache.set(pubkey, { data: null, timestamp: Date.now() });
+    
     return null;
   }
 }

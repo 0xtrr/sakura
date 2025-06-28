@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { getUserRelayList, createRelayListEvent, signEventWithMethod, publishToRelays } from '../utils/nostr';
+import { getUserRelayList, createRelayListEvent, signEventWithMethod, publishToRelays, clearRelayListCache } from '../utils/nostr';
 import type { RelayMetadata } from '../types';
 
 interface RelayManagementProps {
@@ -188,6 +188,9 @@ export function RelayManagement({ onClose, onRelayListUpdate }: RelayManagementP
       await publishToRelays(relayUrls, signedEvent);
       
       console.log('✅ RelayManagement: Successfully updated relay list to', relayUrls.length, 'relays');
+      
+      // Clear cache so next fetch gets the updated relay list
+      clearRelayListCache(user.pubkey);
       
       // Update parent component
       onRelayListUpdate(relayList);
