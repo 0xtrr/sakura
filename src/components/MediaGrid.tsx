@@ -17,7 +17,7 @@ interface MediaGridProps {
 
 export function MediaGrid({ userServerList }: MediaGridProps) {
   const { getSigningMethod } = useAuth();
-  const { media, loading, error, isStale, isDataStale, fetchMedia, removeMedia } = useMediaCache();
+  const { media, loading, error, fetchMedia, removeMedia } = useMediaCache();
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [filterBy, setFilterBy] = useState<FilterOption>('all');
@@ -25,9 +25,6 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
   const [mirrorDialogOpen, setMirrorDialogOpen] = useState(false);
   const [selectedBlobUrl, setSelectedBlobUrl] = useState<string | null>(null);
   const [refreshingAfterMirror, setRefreshingAfterMirror] = useState(false);
-
-  // Check if current data is stale for this server list
-  const dataIsStale = isStale || isDataStale(userServerList);
 
   // Memoized sorted and filtered media
   const filteredAndSortedMedia = useMemo(() => {
@@ -226,23 +223,10 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
               <div className="flex gap-2">
                 <button 
                   onClick={loadMedia} 
-                  className={`flex-1 sm:flex-none text-xs sm:text-sm transition-colors ${
-                    dataIsStale 
-                      ? 'bg-orange-100 text-orange-700 border border-orange-200 hover:bg-orange-200 px-3 py-2 rounded-lg'
-                      : 'btn-secondary'
-                  }`}
-                  title={dataIsStale ? 'Data may be outdated - click to refresh' : 'Refresh media list'}
+                  className="btn-secondary flex-1 sm:flex-none text-xs sm:text-sm"
+                  title="Refresh media list"
                 >
-                  {dataIsStale ? (
-                    <>
-                      <svg className="w-3 h-3 mr-1 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.732-.833-2.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                      </svg>
-                      Update Available
-                    </>
-                  ) : (
-                    'Refresh'
-                  )}
+                  Refresh
                 </button>
               </div>
             </div>
