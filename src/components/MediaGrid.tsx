@@ -158,9 +158,17 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
 
   const handleMirrorSuccess = useCallback(async () => {
     // Refresh media data to show updated server availability
+    console.log('🔄 MediaGrid: Starting refresh after successful mirror operation');
     setRefreshingAfterMirror(true);
+    
     try {
-      await fetchMedia(userServerList);
+      // Add a small delay to allow server propagation
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      console.log('🔄 MediaGrid: Fetching updated media data with force=true...');
+      await fetchMedia(userServerList, true); // Force refresh to bypass cache
+      console.log('✅ MediaGrid: Media data refreshed successfully');
+    } catch (error) {
+      console.error('❌ MediaGrid: Failed to refresh media data:', error);
     } finally {
       setRefreshingAfterMirror(false);
     }
