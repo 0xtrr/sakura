@@ -8,6 +8,8 @@ interface UploadSettingsProps {
   onServerChange: (server: BlossomServer) => void;
   availableServers: BlossomServer[];
   userServerList: UserServerList | null;
+  autoMirror: boolean;
+  onAutoMirrorChange: (enabled: boolean) => void;
 }
 
 export const UploadSettings = memo(function UploadSettings({
@@ -16,7 +18,9 @@ export const UploadSettings = memo(function UploadSettings({
   selectedServer,
   onServerChange,
   availableServers,
-  userServerList
+  userServerList,
+  autoMirror,
+  onAutoMirrorChange
 }: UploadSettingsProps) {
   return (
     <div className="bg-gray-50 rounded-lg p-4 space-y-4">
@@ -47,6 +51,34 @@ export const UploadSettings = memo(function UploadSettings({
           )}
         </div>
       </div>
+
+      {/* Auto Mirror Setting */}
+      {userServerList && userServerList.servers.length > 1 && (
+        <div className="flex items-start space-x-3">
+          <div className="flex items-center h-5">
+            <input
+              id="auto-mirror"
+              type="checkbox"
+              checked={autoMirror}
+              onChange={(e) => onAutoMirrorChange(e.target.checked)}
+              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2"
+            />
+          </div>
+          <div className="text-sm">
+            <label htmlFor="auto-mirror" className="font-medium text-gray-900 cursor-pointer">
+              Auto-mirror failed uploads (BUD-04)
+            </label>
+            <p className="text-gray-600 mt-1">
+              Automatically mirror blobs to servers that failed during initial upload to ensure complete redundancy.
+            </p>
+            {autoMirror && (
+              <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-blue-800 text-xs">
+                🪞 Failed uploads will be automatically mirrored to ensure all servers have your files.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Server Selection */}
       {!userServerList && availableServers.length > 1 && (

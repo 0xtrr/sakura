@@ -1,6 +1,6 @@
 import type { BlossomBlob, BlossomUploadResponse, BlossomServer } from '../types';
 import { createBlossomAuthEvent, encodeAuthEvent } from '../utils/nostr';
-import { generateFallbackUrls, fetchWithFallback } from '../utils/serverList';
+import { generateFallbackUrls, fetchWithFallback, extractSha256FromUrl } from '../utils/serverList';
 import { calculateSHA256 } from '../utils/fileUtils';
 import { serverListService } from './serverList';
 import type { UserServerList } from '../types';
@@ -137,6 +137,7 @@ export class BlossomAPI {
 
   /**
    * Mirror a blob from another server (BUD-04)
+   * According to BUD-04: auth event must include blob hash in 'x' tag
    */
   async mirrorBlob(sourceUrl: string, signingMethod: 'extension' | 'nsec'): Promise<BlossomUploadResponse> {
     // Normalize URL to avoid double slashes
@@ -144,9 +145,17 @@ export class BlossomAPI {
     const url = `${baseUrl}/mirror`;
     
     try {
-      // For mirror operations, we don't have the hash beforehand
-      const authEvent = await createBlossomAuthEvent('upload', signingMethod, undefined, 'Mirror blob');
+      // Extract hash from source URL (required for BUD-04 auth event)
+      const blobHash = extractSha256FromUrl(sourceUrl);
+      if (!blobHash) {
+        throw new Error('Cannot extract blob hash from source URL. BUD-04 requires hash in URL.');
+      }
+
+      // Create auth event with blob hash (BUD-04 requirement)
+      const authEvent = await createBlossomAuthEvent('upload', signingMethod, blobHash, `Mirror blob ${blobHash}`);
       const authHeader = encodeAuthEvent(authEvent);
+
+      console.log(`🪞 Mirroring blob ${blobHash} from ${sourceUrl} to ${this.server.url}`);
 
       const response = await fetch(url, {
         method: 'PUT',
@@ -162,7 +171,9 @@ export class BlossomAPI {
         throw new Error(`Mirror failed: ${response.status} ${errorText}`);
       }
 
-      return await response.json();
+      const result = await response.json();
+      console.log(`✅ Successfully mirrored blob ${blobHash} to ${this.server.url}`);
+      return result;
     } catch (error) {
       console.error('Mirror error:', error);
       throw error;
@@ -671,6 +682,164 @@ export class EnhancedBlossomAPI extends BlossomAPI {
     if (successCount === 0) {
       throw lastError || new Error('Failed to delete from any server');
     }
+  }
+
+  /**
+   * Mirror a blob to all servers in the user's server list (BUD-04)
+   * This ensures maximum decentralization by copying the blob to all available servers
+   */
+  async mirrorBlobToAllServers(sourceUrl: string, signingMethod: 'extension' | 'nsec'): Promise<{
+    successful: Array<{ serverUrl: string; result: BlossomUploadResponse }>;
+    failed: Array<{ serverUrl: string; error: Error }>;
+    sourceServer: string;
+  }> {
+    if (!this.userServerList || this.userServerList.servers.length === 0) {
+      throw new Error('No user server list available. Cannot mirror to other servers.');
+    }
+
+    const blobHash = extractSha256FromUrl(sourceUrl);
+    if (!blobHash) {
+      throw new Error('Cannot extract blob hash from source URL for mirroring.');
+    }
+
+    // Determine source server to avoid mirroring to itself
+    const sourceServer = new URL(sourceUrl).origin;
+    const targetServers = this.userServerList.servers.filter(serverUrl => {
+      const targetOrigin = new URL(serverUrl).origin;
+      return targetOrigin !== sourceServer;
+    });
+
+    if (targetServers.length === 0) {
+      throw new Error('No target servers available for mirroring (source server excluded).');
+    }
+
+    console.log(`🪞 Mirroring blob ${blobHash} from ${sourceServer} to ${targetServers.length} servers...`);
+
+    // Create mirror promises for all target servers
+    const mirrorPromises = targetServers.map(async (serverUrl): Promise<{ serverUrl: string; result?: BlossomUploadResponse; error?: Error; success: boolean }> => {
+      try {
+        console.log(`🪞 Starting mirror to: ${serverUrl}`);
+        const tempAPI = new BlossomAPI({ url: serverUrl, name: 'temp' });
+        const result = await tempAPI.mirrorBlob(sourceUrl, signingMethod);
+        console.log(`✅ Successfully mirrored to: ${serverUrl}`);
+        return { serverUrl, result, success: true };
+      } catch (error) {
+        console.warn(`❌ Failed to mirror to ${serverUrl}:`, error);
+        return { serverUrl, error: error as Error, success: false };
+      }
+    });
+
+    // Wait for all mirror operations to complete
+    const results = await Promise.allSettled(mirrorPromises);
+
+    // Separate successful and failed mirrors
+    const successful: Array<{ serverUrl: string; result: BlossomUploadResponse }> = [];
+    const failed: Array<{ serverUrl: string; error: Error }> = [];
+
+    results.forEach((result) => {
+      if (result.status === 'fulfilled') {
+        if (result.value.success && result.value.result) {
+          successful.push({
+            serverUrl: result.value.serverUrl,
+            result: result.value.result
+          });
+        } else if (!result.value.success && result.value.error) {
+          failed.push({
+            serverUrl: result.value.serverUrl,
+            error: result.value.error
+          });
+        }
+      } else {
+        failed.push({
+          serverUrl: 'unknown',
+          error: new Error(result.reason)
+        });
+      }
+    });
+
+    console.log(`🪞 Mirror complete: ${successful.length} successful, ${failed.length} failed out of ${targetServers.length} servers`);
+
+    return {
+      successful,
+      failed,
+      sourceServer
+    };
+  }
+
+  /**
+   * Mirror a blob from one specific server to another (BUD-04)
+   */
+  async mirrorBlobBetweenServers(
+    sourceUrl: string, 
+    targetServerUrl: string, 
+    signingMethod: 'extension' | 'nsec'
+  ): Promise<BlossomUploadResponse> {
+    const blobHash = extractSha256FromUrl(sourceUrl);
+    if (!blobHash) {
+      throw new Error('Cannot extract blob hash from source URL for mirroring.');
+    }
+
+    // Verify we're not mirroring to the same server
+    const sourceServer = new URL(sourceUrl).origin;
+    const targetServer = new URL(targetServerUrl).origin;
+    
+    if (sourceServer === targetServer) {
+      throw new Error('Cannot mirror blob to the same server it already exists on.');
+    }
+
+    console.log(`🪞 Mirroring blob ${blobHash} from ${sourceServer} to ${targetServer}`);
+
+    const tempAPI = new BlossomAPI({ url: targetServerUrl, name: 'temp' });
+    return await tempAPI.mirrorBlob(sourceUrl, signingMethod);
+  }
+
+  /**
+   * Check which servers in the user's list already have a specific blob
+   */
+  async checkBlobAvailability(blobHash: string): Promise<{
+    available: string[];
+    unavailable: string[];
+    errors: Array<{ serverUrl: string; error: Error }>;
+  }> {
+    if (!this.userServerList || this.userServerList.servers.length === 0) {
+      return { available: [], unavailable: [], errors: [] };
+    }
+
+    console.log(`🔍 Checking blob ${blobHash} availability across ${this.userServerList.servers.length} servers...`);
+
+    const checkPromises = this.userServerList.servers.map(async (serverUrl) => {
+      try {
+        const baseUrl = normalizeBaseUrl(serverUrl);
+        const response = await fetch(`${baseUrl}/${blobHash}`, { method: 'HEAD' });
+        return { serverUrl, available: response.ok, error: null };
+      } catch (error) {
+        return { serverUrl, available: false, error: error as Error };
+      }
+    });
+
+    const results = await Promise.allSettled(checkPromises);
+    
+    const available: string[] = [];
+    const unavailable: string[] = [];
+    const errors: Array<{ serverUrl: string; error: Error }> = [];
+
+    results.forEach((result) => {
+      if (result.status === 'fulfilled') {
+        if (result.value.available) {
+          available.push(result.value.serverUrl);
+        } else if (result.value.error) {
+          errors.push({ serverUrl: result.value.serverUrl, error: result.value.error });
+        } else {
+          unavailable.push(result.value.serverUrl);
+        }
+      } else {
+        errors.push({ serverUrl: 'unknown', error: new Error(result.reason) });
+      }
+    });
+
+    console.log(`🔍 Availability check complete: ${available.length} have blob, ${unavailable.length} don't have blob, ${errors.length} errors`);
+
+    return { available, unavailable, errors };
   }
 }
 

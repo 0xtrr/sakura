@@ -6,6 +6,7 @@ import type { UserServerList } from '../types';
 import { formatFileSize, isImage, isVideo } from '../utils/fileUtils';
 import { copyToClipboard } from '../utils/clipboard';
 import { ServerAvailabilityIndicator } from './ServerAvailabilityIndicator';
+import { BlobMirrorDialog } from './BlobMirrorDialog';
 
 type SortOption = 'newest' | 'oldest' | 'largest' | 'smallest' | 'name';
 type FilterOption = 'all' | 'images' | 'videos' | 'other';
@@ -21,6 +22,9 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
   const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [filterBy, setFilterBy] = useState<FilterOption>('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [mirrorDialogOpen, setMirrorDialogOpen] = useState(false);
+  const [selectedBlobUrl, setSelectedBlobUrl] = useState<string | null>(null);
+  const [refreshingAfterMirror, setRefreshingAfterMirror] = useState(false);
 
   // Check if current data is stale for this server list
   const dataIsStale = isStale || isDataStale(userServerList);
@@ -141,6 +145,26 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
       console.error('Failed to copy URL:', error);
     }
   }, []);
+
+  const openMirrorDialog = useCallback((blobUrl: string) => {
+    setSelectedBlobUrl(blobUrl);
+    setMirrorDialogOpen(true);
+  }, []);
+
+  const closeMirrorDialog = useCallback(() => {
+    setMirrorDialogOpen(false);
+    setSelectedBlobUrl(null);
+  }, []);
+
+  const handleMirrorSuccess = useCallback(async () => {
+    // Refresh media data to show updated server availability
+    setRefreshingAfterMirror(true);
+    try {
+      await fetchMedia(userServerList);
+    } finally {
+      setRefreshingAfterMirror(false);
+    }
+  }, [fetchMedia, userServerList]);
 
   if (loading) {
     return (
@@ -382,6 +406,22 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
                         />
                       </svg>
                     </a>
+                    {userServerList && userServerList.servers.length > 1 && (
+                      <button
+                        onClick={() => openMirrorDialog(item.url)}
+                        className="p-2 bg-blue-500 rounded-lg text-white hover:bg-blue-600 transition-colors"
+                        title="Mirror to other servers"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={2}
+                            d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"
+                          />
+                        </svg>
+                      </button>
+                    )}
                     <button
                       onClick={() => deleteMedia(item.sha256)}
                       className="p-2 bg-red-500 rounded-lg text-white hover:bg-red-600 transition-colors"
@@ -471,6 +511,22 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
                     </svg>
                     Open
                   </a>
+                  {userServerList && userServerList.servers.length > 1 && (
+                    <button
+                      onClick={() => openMirrorDialog(item.url)}
+                      className="flex items-center justify-center px-3 py-2 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors border border-blue-200"
+                    >
+                      <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"
+                        />
+                      </svg>
+                      Mirror
+                    </button>
+                  )}
                   <button
                     onClick={() => deleteMedia(item.sha256)}
                     className="flex items-center justify-center px-3 py-2 text-xs bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors border border-red-200"
@@ -490,6 +546,25 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
             </div>
           ))}
         </div>
+      )}
+
+      {/* Refreshing After Mirror Indicator */}
+      {refreshingAfterMirror && (
+        <div className="fixed bottom-4 right-4 bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg flex items-center z-40">
+          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+          Updating server availability...
+        </div>
+      )}
+
+      {/* Mirror Dialog */}
+      {selectedBlobUrl && (
+        <BlobMirrorDialog
+          isOpen={mirrorDialogOpen}
+          onClose={closeMirrorDialog}
+          blobUrl={selectedBlobUrl}
+          userServerList={userServerList}
+          onMirrorSuccess={handleMirrorSuccess}
+        />
       )}
     </div>
   );
