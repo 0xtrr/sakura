@@ -1,0 +1,111 @@
+name: Build and Publish Docker Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Docker image tag'
+        required: true
+        default: 'main'
+        type: string
+      additional_tags:
+        description: 'Additional tags (comma-separated, optional)'
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ inputs.image_tag }}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix={{branch}}-
+
+      - name: Parse additional tags
+        id: additional_tags
+        run: |
+          EXTRA_TAGS=""
+          if [ -n "${{ inputs.additional_tags }}" ]; then
+            IFS=',' read -ra ADDR <<< "${{ inputs.additional_tags }}"
+            for tag in "${ADDR[@]}"; do
+              # Trim whitespace
+              tag=$(echo "$tag" | xargs)
+              if [ -n "$tag" ]; then
+                EXTRA_TAGS="$EXTRA_TAGS,${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:$tag"
+              fi
+            done
+          fi
+          echo "extra_tags=$EXTRA_TAGS" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.tags }}${{ steps.additional_tags.outputs.extra_tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Generate summary
+        run: |
+          echo "## 🐳 Docker Image Published" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Repository:** \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tags:**" >> $GITHUB_STEP_SUMMARY
+          echo "- \`${{ inputs.image_tag }}\`" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "- \`latest\`" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "- \`${{ github.ref_name }}-${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ inputs.additional_tags }}" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Additional Tags:**" >> $GITHUB_STEP_SUMMARY
+            IFS=',' read -ra ADDR <<< "${{ inputs.additional_tags }}"
+            for tag in "${ADDR[@]}"; do
+              tag=$(echo "$tag" | xargs)
+              if [ -n "$tag" ]; then
+                echo "- \`$tag\`" >> $GITHUB_STEP_SUMMARY
+              fi
+            done
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Pull command:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run command:**" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "docker run -p 3000:3000 ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ inputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
