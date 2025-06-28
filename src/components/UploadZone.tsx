@@ -34,6 +34,7 @@ export function UploadZone({ userServerList }: UploadZoneProps) {
   const [uploads, setUploads] = useState<UploadProgress[]>([]);
   const [selectedServer, setSelectedServer] = useState(DEFAULT_BLOSSOM_SERVERS[0]);
   const [removeExif, setRemoveExif] = useState(true);
+  const [uploadToAllServers, setUploadToAllServers] = useState(false); // Default to primary server only
   const [copiedUrls, setCopiedUrls] = useState<Set<string>>(new Set());
   const [metadataVisible, setMetadataVisible] = useState<Set<string>>(new Set());
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
@@ -137,12 +138,33 @@ export function UploadZone({ userServerList }: UploadZoneProps) {
             : upload
         ));
 
-        const uploadResult = await enhancedAPI.uploadWithFallbackSequential(processedFile, signingMethod);
-        result = uploadResult.result;
-        uploadDetails = {
-          serverUrl: uploadResult.serverUrl,
-          attemptedServers: uploadResult.attemptedServers
-        };
+        if (uploadToAllServers) {
+          // Upload to all servers simultaneously for maximum redundancy
+          const uploadResult = await enhancedAPI.uploadToAllServers(processedFile, signingMethod);
+          result = uploadResult.primaryResult;
+          uploadDetails = {
+            serverUrl: uploadResult.successful[0]?.serverUrl || 'unknown',
+            attemptedServers: [
+              ...uploadResult.successful.map(s => ({ 
+                serverUrl: s.serverUrl, 
+                success: true 
+              })),
+              ...uploadResult.failed.map(f => ({ 
+                serverUrl: f.serverUrl, 
+                error: f.error.message, 
+                success: false 
+              }))
+            ]
+          };
+        } else {
+          // Upload to primary server with fallback to other servers if needed
+          const uploadResult = await enhancedAPI.uploadWithFallbackSequential(processedFile, signingMethod);
+          result = uploadResult.result;
+          uploadDetails = {
+            serverUrl: uploadResult.serverUrl,
+            attemptedServers: uploadResult.attemptedServers
+          };
+        }
       } else {
         const blossomAPI = createBlossomAPI(selectedServer);
         result = await blossomAPI.uploadFile(processedFile, signingMethod);
@@ -356,6 +378,21 @@ export function UploadZone({ userServerList }: UploadZoneProps) {
             </label>
           </div>
 
+          {userServerList && userServerList.servers.length > 1 && (
+            <div className="flex items-start">
+              <input
+                type="checkbox"
+                id="uploadToAllServers"
+                checked={uploadToAllServers}
+                onChange={(e) => setUploadToAllServers(e.target.checked)}
+                className="h-4 w-4 text-pink-600 focus:ring-pink-500 border-gray-300 rounded mt-0.5"
+              />
+              <label htmlFor="uploadToAllServers" className="ml-2 text-sm text-gray-700 leading-relaxed">
+                Upload to all servers simultaneously (maximum redundancy)
+              </label>
+            </div>
+          )}
+
           {/* Video/Audio metadata warning */}
           <div className="flex items-start text-sm text-amber-700 bg-amber-50 p-3 rounded-lg border border-amber-200">
             <svg className="w-4 h-4 mr-2 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -385,12 +422,22 @@ export function UploadZone({ userServerList }: UploadZoneProps) {
                 />
               </svg>
               <div className="flex-1 leading-relaxed">
-                <p className="font-medium">Primary Server Upload with Fallback</p>
+                <p className="font-medium">
+                  {uploadToAllServers ? 'Upload to All Servers Simultaneously' : 'Primary Server Upload with Fallback'}
+                </p>
                 <p className="mt-1">
-                  Files will be uploaded to your primary server: <span className="font-medium">{new URL(userServerList.servers[0]).hostname}</span>
+                  {uploadToAllServers ? (
+                    <>Files will be uploaded to <span className="font-medium">all {userServerList.servers.length} servers</span> at the same time for maximum redundancy</>
+                  ) : (
+                    <>Files will be uploaded to your primary server: <span className="font-medium">{new URL(userServerList.servers[0]).hostname}</span></>
+                  )}
                 </p>
                 <p className="mt-1 text-xs opacity-75">
-                  If the primary server fails, we'll automatically try your other {userServerList.servers.length - 1} server(s) as fallback.
+                  {uploadToAllServers ? (
+                    <>This provides maximum decentralization but uses more bandwidth and may take longer.</>
+                  ) : (
+                    <>If the primary server fails, we'll automatically try your other {userServerList.servers.length - 1} server(s) as fallback.</>
+                  )}
                 </p>
               </div>
             </div>
