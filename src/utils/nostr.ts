@@ -559,7 +559,7 @@ export async function queryRelays(
 export async function publishToRelays(
   relayUrls: string[],
   event: Event,
-  timeout = 10000
+  _timeout = 10000
 ): Promise<void> {
   console.log(`📡 publishToRelays: Publishing event kind ${event.kind} to ${relayUrls.length} relays:`, relayUrls);
   
