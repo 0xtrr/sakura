@@ -19,7 +19,7 @@ interface MediaGridProps {
 export function MediaGrid({ userServerList }: MediaGridProps) {
   const { getSigningMethod } = useAuth();
   const { media, loading, error, fetchMedia, removeMedia } = useMediaCache();
-  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  // Removed global copiedUrl state - each MediaItem handles its own feedback
   const [sortBy, setSortBy] = useState<SortOption>('newest');
   const [filterBy, setFilterBy] = useState<FilterOption>('all');
   const [searchTerm, setSearchTerm] = useState('');
@@ -129,16 +129,19 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
     }
   }, [userServerList, getSigningMethod, media, removeMedia, loadMedia]);
 
-  const copyUrl = useCallback(async (url: string) => {
+  const copyUrl = useCallback(async (url: string, event?: React.MouseEvent) => {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    
     try {
       const success = await copyToClipboard(url);
       
-      if (success) {
-        setCopiedUrl(url);
-        setTimeout(() => setCopiedUrl(null), 2000); // Clear feedback after 2 seconds
-      } else {
+      if (!success) {
         console.error('Failed to copy URL to clipboard');
       }
+      // Note: visual feedback is now handled locally in each MediaItem
     } catch (error) {
       console.error('Failed to copy URL:', error);
     }
@@ -198,17 +201,30 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
     userServerList, 
     onCopyUrl, 
     onOpenMirror, 
-    onDelete,
-    isCopied 
+    onDelete
   }: {
     item: BlossomBlob;
     userServerList: UserServerList | null;
-    onCopyUrl: (url: string) => void;
+    onCopyUrl: (url: string, event?: React.MouseEvent) => void;
     onOpenMirror: (url: string) => void;
     onDelete: (sha256: string) => void;
-    isCopied: boolean;
   }) {
-    const handleCopyUrl = useCallback(() => onCopyUrl(item.url), [onCopyUrl, item.url]);
+    const [desktopCopied, setDesktopCopied] = useState(false);
+    const [mobileCopied, setMobileCopied] = useState(false);
+    
+    const handleCopyUrl = useCallback((event: React.MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onCopyUrl(item.url, event);
+      
+      // Local visual feedback that doesn't cause parent re-render
+      setDesktopCopied(true);
+      setMobileCopied(true);
+      setTimeout(() => {
+        setDesktopCopied(false);
+        setMobileCopied(false);
+      }, 1000);
+    }, [onCopyUrl, item.url]);
     const handleOpenMirror = useCallback(() => onOpenMirror(item.url), [onOpenMirror, item.url]);
     const handleDelete = useCallback(() => onDelete(item.sha256), [onDelete, item.sha256]);
 
@@ -249,16 +265,24 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
           <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-50 transition-all duration-200 items-center justify-center opacity-0 group-hover:opacity-100 hidden sm:flex">
             <div className="flex space-x-2">
               <button
+                type="button"
                 onClick={handleCopyUrl}
-                className="p-2 bg-white rounded-lg text-gray-700 hover:bg-gray-100 transition-colors"
-                title="Copy URL"
+                className={`p-2 rounded-lg transition-colors ${
+                  desktopCopied 
+                    ? 'bg-green-500 text-white' 
+                    : 'bg-white text-gray-700 hover:bg-gray-100'
+                }`}
+                title={desktopCopied ? "Copied!" : "Copy URL"}
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path
                     strokeLinecap="round"
                     strokeLinejoin="round"
                     strokeWidth={2}
-                    d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    d={desktopCopied 
+                      ? "M5 13l4 4L19 7"
+                      : "M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                    }
                   />
                 </svg>
               </button>
@@ -280,6 +304,7 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
               </a>
               {userServerList && userServerList.servers.length > 1 && (
                 <button
+                  type="button"
                   onClick={handleOpenMirror}
                   className="p-2 bg-blue-500 rounded-lg text-white hover:bg-blue-600 transition-colors"
                   title="Mirror to other servers"
@@ -295,6 +320,7 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
                 </button>
               )}
               <button
+                type="button"
                 onClick={handleDelete}
                 className="p-2 bg-red-500 rounded-lg text-white hover:bg-red-600 transition-colors"
                 title="Delete"
@@ -334,14 +360,15 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
           {/* Mobile-friendly action buttons */}
           <div className="flex flex-wrap gap-2 sm:hidden">
             <button
+              type="button"
               onClick={handleCopyUrl}
               className={`flex-1 flex items-center justify-center px-3 py-2 text-xs rounded-lg transition-colors border ${
-                isCopied
+                mobileCopied
                   ? 'bg-green-50 text-green-700 border-green-200'
                   : 'bg-pink-50 text-pink-700 border-pink-200 hover:bg-pink-100'
               }`}
             >
-              {isCopied ? (
+              {mobileCopied ? (
                 <>
                   <svg className="w-3 h-3 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path
@@ -385,6 +412,7 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
             </a>
             {userServerList && userServerList.servers.length > 1 && (
               <button
+                type="button"
                 onClick={handleOpenMirror}
                 className="flex items-center justify-center px-3 py-2 text-xs bg-blue-50 text-blue-700 rounded-lg hover:bg-blue-100 transition-colors border border-blue-200"
               >
@@ -400,6 +428,7 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
               </button>
             )}
             <button
+              type="button"
               onClick={handleDelete}
               className="flex items-center justify-center px-3 py-2 text-xs bg-red-50 text-red-700 rounded-lg hover:bg-red-100 transition-colors border border-red-200"
             >
@@ -577,7 +606,6 @@ export function MediaGrid({ userServerList }: MediaGridProps) {
               onCopyUrl={copyUrl}
               onOpenMirror={openMirrorDialog}
               onDelete={deleteMedia}
-              isCopied={copiedUrl === item.url}
             />
           ))}
         </div>

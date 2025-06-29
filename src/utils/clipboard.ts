@@ -17,9 +17,13 @@ export async function copyToClipboard(text: string): Promise<boolean> {
     textArea.style.position = 'fixed';
     textArea.style.left = '-999999px';
     textArea.style.top = '-999999px';
+    textArea.style.opacity = '0';
+    textArea.style.pointerEvents = 'none';
+    textArea.setAttribute('readonly', '');
     
     document.body.appendChild(textArea);
-    textArea.focus();
+    
+    textArea.focus({ preventScroll: true });
     textArea.select();
     
     // Use execCommand for fallback
